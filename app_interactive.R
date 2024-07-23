@@ -5,6 +5,7 @@ library(quantmod)
 library(PortfolioAnalytics)
 library(ROI)
 library(ROI.plugin.quadprog)
+library(plotly)
 
 # Define the plotting function
 plot_efficient_frontier <- function(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate) {
@@ -19,7 +20,7 @@ plot_efficient_frontier <- function(portfolios, efficient_frontier, gmvp, optimu
   y_min <- min(risk_free_rate, min(portfolios$Return)) * 0.9
   y_max <- max(portfolios$Return) * 1.1
   
-  ggplot() +
+  p <- ggplot() +
     geom_point(data = portfolios, aes(x = Risk, y = Return), alpha = 0.3, color = "gray") +
     geom_point(data = efficient_frontier, aes(x = Risk, y = Return), color = "blue", size = 2) +
     geom_point(data = gmvp, aes(x = Risk, y = Return), color = "red", size = 3, shape = 17) +
@@ -35,6 +36,8 @@ plot_efficient_frontier <- function(portfolios, efficient_frontier, gmvp, optimu
     geom_hline(yintercept = risk_free_rate, linetype = "dotted", color = "darkgreen") +
     annotate("text", x = x_min, y = risk_free_rate, label = "Risk-free rate", 
              vjust = -0.5, hjust = 0, color = "darkgreen")
+  
+  ggplotly(p)
 }
 
 # UI
@@ -51,7 +54,7 @@ ui <- fluidPage(
       actionButton("stop", "Stop App")
     ),
     mainPanel(
-      plotOutput("efficient_frontier_plot")
+      plotlyOutput("efficient_frontier_plot")
     )
   )
 )
@@ -121,7 +124,7 @@ server <- function(input, output, session) {
   })
   
   # Plot efficient frontier
-  output$efficient_frontier_plot <- renderPlot({
+  output$efficient_frontier_plot <- renderPlotly({
     req(portfolios_data())
     
     portfolios <- portfolios_data()$portfolios

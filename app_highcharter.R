@@ -1,40 +1,31 @@
 # Load required libraries
 library(shiny)
-library(ggplot2)
 library(quantmod)
 library(PortfolioAnalytics)
 library(ROI)
 library(ROI.plugin.quadprog)
+library(highcharter)
 
 # Define the plotting function
-plot_efficient_frontier <- function(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate) {
-  # Calculate the range of risk values
-  risk_range <- range(portfolios$Risk)
-  
-  # Set the x-axis limits
-  x_min <- max(0, risk_range[1] * 0.9)  # 90% of the minimum risk, but not less than 0
-  x_max <- risk_range[2] * 1.1  # 110% of the maximum risk
-  
-  # Set the y-axis limits
-  y_min <- min(risk_free_rate, min(portfolios$Return)) * 0.9
-  y_max <- max(portfolios$Return) * 1.1
-  
-  ggplot() +
-    geom_point(data = portfolios, aes(x = Risk, y = Return), alpha = 0.3, color = "gray") +
-    geom_point(data = efficient_frontier, aes(x = Risk, y = Return), color = "blue", size = 2) +
-    geom_point(data = gmvp, aes(x = Risk, y = Return), color = "red", size = 3, shape = 17) +
-    geom_point(data = optimum_portfolio, aes(x = Risk, y = Return), color = "green", size = 3, shape = 18) +
-    geom_line(data = tangent_line, aes(x = Risk, y = Return), color = "purple", linetype = "dashed") +
-    theme_minimal() +
-    labs(title = "Efficient Frontier",
-         x = "Portfolio Risk (Standard Deviation)",
-         y = "Portfolio Return") +
-    theme(plot.title = element_text(hjust = 0.5)) +
-    coord_cartesian(xlim = c(x_min, x_max), 
-                    ylim = c(y_min, y_max)) +
-    geom_hline(yintercept = risk_free_rate, linetype = "dotted", color = "darkgreen") +
-    annotate("text", x = x_min, y = risk_free_rate, label = "Risk-free rate", 
-             vjust = -0.5, hjust = 0, color = "darkgreen")
+plot_efficient_frontier_highcharter <- function(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate) {
+  highchart() %>%
+    hc_add_series(data = portfolios, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Portfolios", marker = list(symbol = "circle", fillOpacity = 0.3), color = "gray") %>%
+    hc_add_series(data = efficient_frontier, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Efficient Frontier", marker = list(symbol = "circle"), color = "blue") %>%
+    hc_add_series(data = gmvp, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "GMVP", marker = list(symbol = "triangle", radius = 5), color = "red") %>%
+    hc_add_series(data = optimum_portfolio, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Optimum Portfolio", marker = list(symbol = "diamond", radius = 5), color = "green") %>%
+    hc_add_series(data = tangent_line, type = "line", hcaes(x = Risk, y = Return), 
+                  name = "Tangent Line", color = "purple", dashStyle = "Dash") %>%
+    hc_xAxis(title = list(text = "Portfolio Risk (Standard Deviation)"), min = 0, max = max(portfolios$Risk) * 1.1) %>%
+    hc_yAxis(title = list(text = "Portfolio Return"), min = min(risk_free_rate, min(portfolios$Return)) * 0.9, 
+             max = max(portfolios$Return) * 1.1) %>%
+    hc_add_series(data = list(list(x = 0, y = risk_free_rate), list(x = max(portfolios$Risk) * 1.1, y = risk_free_rate)), 
+                  type = "line", name = "Risk-free Rate", color = "darkgreen", dashStyle = "Dot") %>%
+    hc_legend(enabled = TRUE) %>%
+    hc_title(text = "Efficient Frontier")
 }
 
 # UI
@@ -51,7 +42,7 @@ ui <- fluidPage(
       actionButton("stop", "Stop App")
     ),
     mainPanel(
-      plotOutput("efficient_frontier_plot")
+      highchartOutput("efficient_frontier_plot")
     )
   )
 )
@@ -121,7 +112,7 @@ server <- function(input, output, session) {
   })
   
   # Plot efficient frontier
-  output$efficient_frontier_plot <- renderPlot({
+  output$efficient_frontier_plot <- renderHighchart({
     req(portfolios_data())
     
     portfolios <- portfolios_data()$portfolios
@@ -137,7 +128,7 @@ server <- function(input, output, session) {
       Return = c(risk_free_rate, risk_free_rate + slope * max(portfolios$Risk))
     )
     
-    plot_efficient_frontier(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate)
+    plot_efficient_frontier_highcharter(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate)
   })
 
   # Stop the app when the stop button is clicked
