@@ -1,57 +1,108 @@
 # Load required libraries
 library(shiny)
-library(ggplot2)
 library(quantmod)
 library(PortfolioAnalytics)
 library(ROI)
 library(ROI.plugin.quadprog)
+library(highcharter)
+library(shinydashboard)
+library(DT)
 
-# Define the plotting function
-plot_efficient_frontier <- function(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate) {
-  # Calculate the range of risk values
-  risk_range <- range(portfolios$Risk)
+plot_efficient_frontier_highcharter <- function(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate) {
+  # Define axis limits
+  gmvp_risk <- gmvp$Risk
+  max_risk <- max(portfolios$Risk) * 1.1
+  x_min <- floor(gmvp_risk * 10) / 10  # Closest risk divisible by 0.1 below GMVP risk
   
-  # Set the x-axis limits
-  x_min <- max(0, risk_range[1] * 0.9)  # 90% of the minimum risk, but not less than 0
-  x_max <- risk_range[2] * 1.1  # 110% of the maximum risk
+  # Create a flag to differentiate efficient frontier points
+  portfolios$is_efficient <- portfolios$Risk %in% efficient_frontier$Risk
   
-  # Set the y-axis limits
-  y_min <- min(risk_free_rate, min(portfolios$Return)) * 0.9
-  y_max <- max(portfolios$Return) * 1.1
-  
-  ggplot() +
-    geom_point(data = portfolios, aes(x = Risk, y = Return), alpha = 0.3, color = "gray") +
-    geom_point(data = efficient_frontier, aes(x = Risk, y = Return), color = "blue", size = 2) +
-    geom_point(data = gmvp, aes(x = Risk, y = Return), color = "red", size = 3, shape = 17) +
-    geom_point(data = optimum_portfolio, aes(x = Risk, y = Return), color = "green", size = 3, shape = 18) +
-    geom_line(data = tangent_line, aes(x = Risk, y = Return), color = "purple", linetype = "dashed") +
-    theme_minimal() +
-    labs(title = "Efficient Frontier",
-         x = "Portfolio Risk (Standard Deviation)",
-         y = "Portfolio Return") +
-    theme(plot.title = element_text(hjust = 0.5)) +
-    coord_cartesian(xlim = c(x_min, x_max), 
-                    ylim = c(y_min, y_max)) +
-    geom_hline(yintercept = risk_free_rate, linetype = "dotted", color = "darkgreen") +
-    annotate("text", x = x_min, y = risk_free_rate, label = "Risk-free rate", 
-             vjust = -0.5, hjust = 0, color = "darkgreen")
+  highchart() %>%
+    hc_add_series(data = portfolios[portfolios$is_efficient == FALSE, ], type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Portfolios", marker = list(symbol = "circle", radius = 2, fillOpacity = 0.3), color = "gray") %>%
+    hc_add_series(data = efficient_frontier, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Efficient Frontier", marker = list(symbol = "circle", radius = 5), color = "blue") %>%
+    hc_add_series(data = gmvp, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "GMVP", marker = list(symbol = "triangle", radius = 7), color = "red") %>%
+    hc_add_series(data = optimum_portfolio, type = "scatter", hcaes(x = Risk, y = Return), 
+                  name = "Optimum Portfolio", marker = list(symbol = "diamond", radius = 7), color = "green") %>%
+    hc_add_series(data = tangent_line, type = "line", hcaes(x = Risk, y = Return), 
+                  name = "Tangent Line", color = "purple", dashStyle = "Dash") %>%
+    hc_xAxis(title = list(text = "Portfolio Risk (Standard Deviation)"), 
+             gridLineWidth = 1, 
+             min = x_min, 
+             max = max_risk,
+             startOnTick = TRUE, 
+             endOnTick = TRUE) %>%
+    hc_yAxis(title = list(text = "Portfolio Return"), 
+             gridLineWidth = 1, 
+             min = 0, 
+             max = max(portfolios$Return) * 1.1,
+             startOnTick = TRUE, 
+             endOnTick = TRUE) %>%
+    hc_add_series(data = list(list(x = 0, y = risk_free_rate), list(x = max_risk, y = risk_free_rate)), 
+                  type = "line", name = "Risk-free Rate", color = "darkgreen", dashStyle = "Dot") %>%
+    hc_legend(enabled = TRUE) %>%
+    hc_title(text = "Efficient Frontier")
 }
 
 # UI
-ui <- fluidPage(
-  titlePanel("Portfolio Optimization and Efficient Frontier"),
-  sidebarLayout(
-    sidebarPanel(
-      textInput("tickers", "Enter stock tickers (comma-separated)", "AAPL,GOOGL,MSFT,AMZN"),
-      dateRangeInput("dates", "Select date range",
-                     start = Sys.Date() - 365*5,
-                     end = Sys.Date()),
-      numericInput("num_portfolios", "Number of portfolios to simulate", 5000, min = 1000, max = 10000),
-      actionButton("run", "Run Optimization"),
-      actionButton("stop", "Stop App")
-    ),
-    mainPanel(
-      plotOutput("efficient_frontier_plot")
+ui <- dashboardPage(
+  dashboardHeader(title = "Portfolio Optimization"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Efficient Frontier", tabName = "frontier", icon = icon("chart-line")),
+      menuItem("Portfolio Weights", tabName = "weights", icon = icon("balance-scale")),
+      menuItem("Input Data", tabName = "data", icon = icon("table"))
+    )
+  ),
+  dashboardBody(
+    tabItems(
+      tabItem(tabName = "frontier",
+        fluidRow(
+          box(
+            title = "Input Parameters", status = "primary", solidHeader = TRUE,
+            textInput("tickers", "Enter stock tickers (comma-separated)", "AAPL,GOOGL,MSFT,AMZN"),
+            dateRangeInput("dates", "Select date range",
+                           start = Sys.Date() - 365*5,
+                           end = Sys.Date()),
+            numericInput("num_portfolios", "Number of portfolios to simulate", 5000, min = 1000, max = 10000),
+            numericInput("risk_free_rate", "Risk-free rate (%)", 1, min = 0, max = 10, step = 0.1),
+            actionButton("run", "Run Optimization", class = "btn-success"),
+            width = 4
+          ),
+          box(
+            title = "Efficient Frontier", status = "primary", solidHeader = TRUE,
+            highchartOutput("efficient_frontier_plot"),
+            width = 8
+          )
+        )
+      ),
+      tabItem(tabName = "weights",
+        fluidRow(
+          box(
+            title = "Optimal Portfolio Weights", status = "info", solidHeader = TRUE,
+            DTOutput("weights_table"),
+            verbatimTextOutput("optimum_metrics"),
+            width = 12
+          ),
+          box(
+            title = "GMVP Weights", status = "info", solidHeader = TRUE,
+            DTOutput("gmvp_weights_table"),
+            verbatimTextOutput("gmvp_metrics"),
+            width = 12
+          )
+        )
+      ),
+      tabItem(tabName = "data",
+        fluidRow(
+          box(
+            title = "Stock Returns", status = "warning", solidHeader = TRUE,
+            DTOutput("returns_table"),
+            width = 12
+          )
+        )
+      )
     )
   )
 )
@@ -79,7 +130,7 @@ server <- function(input, output, session) {
   })
   
   # Function to generate random portfolios
-  generate_portfolios <- function(returns, num_portfolios) {
+  generate_portfolios <- function(returns, num_portfolios, risk_free_rate) {
     set.seed(42)
     n <- ncol(returns)
     
@@ -89,9 +140,6 @@ server <- function(input, output, session) {
     
     # Number of trading days in a year
     trading_days <- 252
-    
-    # Risk-free rate (assume a small positive number, for example 0.01)
-    risk_free_rate <- 0.01
     
     # Calculate annualized portfolio returns and risks
     port_returns <- weights %*% colMeans(returns) * trading_days
@@ -117,11 +165,11 @@ server <- function(input, output, session) {
   
   # Reactive expression to generate portfolios
   portfolios_data <- eventReactive(input$run, {
-    generate_portfolios(returns(), input$num_portfolios)
+    generate_portfolios(returns(), input$num_portfolios, input$risk_free_rate / 100)
   })
   
   # Plot efficient frontier
-  output$efficient_frontier_plot <- renderPlot({
+  output$efficient_frontier_plot <- renderHighchart({
     req(portfolios_data())
     
     portfolios <- portfolios_data()$portfolios
@@ -137,12 +185,58 @@ server <- function(input, output, session) {
       Return = c(risk_free_rate, risk_free_rate + slope * max(portfolios$Risk))
     )
     
-    plot_efficient_frontier(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate)
+    plot_efficient_frontier_highcharter(portfolios, efficient_frontier, gmvp, optimum_portfolio, tangent_line, risk_free_rate)
   })
 
-  # Stop the app when the stop button is clicked
-  observeEvent(input$stop, {
-    stopApp()
+  # Render optimal portfolio weights table
+  output$weights_table <- renderDT({
+    req(portfolios_data())
+    optimum_portfolio <- portfolios_data()$optimum_portfolio
+    weights <- data.frame(
+      Stock = names(returns()),
+      Weight = round(optimum_portfolio$weights[[1]] * 100, 2)
+    )
+    datatable(weights, options = list(pageLength = 10))
+  })
+
+  # Render GMVP weights table
+  output$gmvp_weights_table <- renderDT({
+    req(portfolios_data())
+    gmvp <- portfolios_data()$gmvp
+    weights <- data.frame(
+      Stock = names(returns()),
+      Weight = round(gmvp$weights[[1]] * 100, 2)
+    )
+    datatable(weights, options = list(pageLength = 10))
+  })
+  
+  # Render optimum portfolio metrics
+  output$optimum_metrics <- renderPrint({
+    req(portfolios_data())
+    optimum_portfolio <- portfolios_data()$optimum_portfolio
+    cat("Optimum Portfolio Metrics:\n")
+    cat("Return: ", round(optimum_portfolio$Return, 4), "\n")
+    cat("Risk: ", round(optimum_portfolio$Risk, 4), "\n")
+    cat("Sharpe Ratio: ", round(optimum_portfolio$SharpeRatio, 4), "\n")
+  })
+  
+  # Render GMVP metrics
+  output$gmvp_metrics <- renderPrint({
+    req(portfolios_data())
+    gmvp <- portfolios_data()$gmvp
+    cat("GMVP Metrics:\n")
+    cat("Return: ", round(gmvp$Return, 4), "\n")
+    cat("Risk: ", round(gmvp$Risk, 4), "\n")
+    cat("Sharpe Ratio: ", round(gmvp$SharpeRatio, 4), "\n")
+  })
+
+  # Render returns table
+  output$returns_table <- renderDT({
+    req(returns())
+    returns_data <- as.data.frame(returns())
+    returns_data$Date <- index(returns())
+    returns_data <- returns_data[, c(ncol(returns_data), 1:(ncol(returns_data)-1))]
+    datatable(returns_data, options = list(pageLength = 10, scrollX = TRUE))
   })
 }
 
